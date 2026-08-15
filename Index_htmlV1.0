@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Consulta de Calificaciones - Bosques del Paraíso</title>
+    <!-- CSS de Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Librerías de Chart.js y Plugin DataLabels para la gráfica -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    
+    <style>
+      body { 
+        background-color: #f4f6f9; 
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+        padding-top: 30px; 
+        padding-bottom: 50px;
+      }
+      .card-custom { 
+        border: none; 
+        border-radius: 12px; 
+        box-shadow: 0 4px 15px rgba(0,0,0,0.08); 
+      }
+      .logo-img {
+        max-height: 100px;
+        width: auto;
+        margin-bottom: 15px;
+        object-fit: contain;
+      }
+      .header-title { 
+        color: #1a365d; 
+        font-weight: 700; 
+      }
+      .badge-promedio { 
+        font-size: 0.95rem; 
+        padding: 6px 12px; 
+      }
+      .table-custom th { 
+        background-color: #1a365d; 
+        color: white; 
+        text-align: center;
+      }
+      .table-custom td {
+        vertical-align: middle;
+      }
+      .chart-container {
+        position: relative;
+        margin: auto;
+        height: 380px;
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="row justify-content-center">
+        <div class="col-md-10 col-lg-9">
+          
+          <!-- Encabezado con Logo -->
+          <div class="text-center mb-4">
+            <img src="https://lh3.googleusercontent.com/d/1WtPODn2M85-4A5d8X2iGdjQWHLcVx815" alt="Logo Bosques del Paraíso" class="logo-img">
+            <h2 class="header-title">Bosques del Paraíso</h2>
+            <p class="text-muted">Consulta de Calificaciones y Desempeño Escolar</p>
+          </div>
+
+          <!-- Formulario de Búsqueda -->
+          <div class="card card-custom p-4 mb-4 bg-white">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label for="selectGrado" class="form-label fw-bold">Grado / Pestaña:</label>
+                <select id="selectGrado" class="form-select">
+                  <option value="">Cargando grados...</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label for="inputId" class="form-label fw-bold">ID del Alumno:</label>
+                <input type="text" id="inputId" class="form-control" placeholder="Ej. AVKV01">
+              </div>
+              <div class="col-12 text-center mt-3">
+                <button onclick="consultar()" class="btn btn-primary btn-lg px-5">Buscar Alumno</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Indicador de Carga -->
+          <div id="loading" class="text-center d-none my-4">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="mt-2 text-muted">Obteniendo registros y generando gráfica...</p>
+          </div>
+
+          <!-- Mensaje de Error -->
+          <div id="errorArea" class="alert alert-danger d-none text-center" role="alert"></div>
+
+          <!-- Área de Resultados -->
+          <div id="resultadoArea" class="card card-custom p-4 bg-white d-none">
+            <div class="border-bottom pb-3 mb-4">
+              <h4 class="text-primary mb-1" id="lblNombre">Nombre del Alumno</h4>
+              <p class="text-muted mb-0">ID: <span id="lblId" class="fw-bold"></span></p>
+            </div>
+
+            <!-- Tabla de Calificaciones -->
+            <h5 class="mb-3 text-secondary fw-bold">Resumen por Rubro de Evaluación</h5>
+            <div class="table-responsive mb-4">
+              <table class="table table-hover table-bordered table-custom">
+                <thead>
+                  <tr>
+                    <th style="text-align: left;">Rubro</th>
+                    <th>Evaluaciones</th>
+                    <th>Entregadas</th>
+                    <th>Pendientes</th>
+                    <th>Promedio / Asistencia</th>
+                  </tr>
+                </thead>
+                <tbody id="tablaResumenBody">
+                  <!-- Llenado dinámico -->
+                </tbody>
+              </table>
+            </div>
+
+            <hr class="my-4">
+
+            <!-- Gráfica de Barras -->
+            <h5 class="mb-3 text-secondary fw-bold">Gráfica de Desempeño por Rubro (Escala 0 al 10)</h5>
+            <div class="chart-container">
+              <canvas id="graficaRubros"></canvas>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <script>
+      var miGrafica = null; // Variable global para controlar la instancia de Chart.js
+
+      // Cargar pestañas al iniciar la página
+      document.addEventListener("DOMContentLoaded", function() {
+        google.script.run
+          .withSuccessHandler(cargarGrados)
+          .withFailureHandler(mostrarError)
+          .obtenerGrados();
+      });
+
+      function cargarGrados(grados) {
+        var select = document.getElementById("selectGrado");
+        select.innerHTML = '<option value="">-- Selecciona un Grado --</option>';
+        grados.forEach(function(g) {
+          var opt = document.createElement("option");
+          opt.value = g;
+          opt.textContent = g;
+          select.appendChild(opt);
+        });
+      }
+
+      function consultar() {
+        var grado = document.getElementById("selectGrado").value;
+        var idAlumno = document.getElementById("inputId").value.trim();
+        
+        if (!grado || !idAlumno) {
+          alert("Por favor selecciona un grado e ingresa un ID válido.");
+          return;
+        }
+        
+        document.getElementById("loading").classList.remove("d-none");
+        document.getElementById("resultadoArea").classList.add("d-none");
+        document.getElementById("errorArea").classList.add("d-none");
+        
+        google.script.run
+          .withSuccessHandler(mostrarResultado)
+          .withFailureHandler(mostrarError)
+          .buscarAlumno(grado, idAlumno);
+      }
+
+      function mostrarResultado(res) {
+        document.getElementById("loading").classList.add("d-none");
+        
+        if (!res.exito) {
+          var errorDiv = document.getElementById("errorArea");
+          errorDiv.textContent = res.mensaje;
+          errorDiv.classList.remove("d-none");
+          return;
+        }
+        
+        // Cargar datos informativos del alumno
+        document.getElementById("lblNombre").textContent = res.alumno.nombre;
+        document.getElementById("lblId").textContent = res.alumno.id;
+        
+        // Construir la Tabla de Resumen
+        var tbody = document.getElementById("tablaResumenBody");
+        tbody.innerHTML = "";
+        
+        var resumen = res.resumen;
+        var rubrosLabels = [];
+        var rubrosValores = [];
+        var barColors = [];
+
+        for (var rubro in resumen) {
+          var data = resumen[rubro];
+          var tr = document.createElement("tr");
+          
+          var tdRubro = `<td><strong>${rubro}</strong></td>`;
+          var tdTotal = `<td class="text-center fw-semibold">${data.total}</td>`;
+          var tdHechas = `<td class="text-center text-success fw-bold">${data.hechas}</td>`;
+          var tdNoHechas = `<td class="text-center text-danger fw-bold">${data.noHechas}</td>`;
+          
+          var tdPromedio = "";
+          var valorEscala10 = 0;
+
+          // Manejo de Asistencia vs Otros Rubros Numéricos
+          if (rubro.toUpperCase().includes("ASISTENCIA")) {
+            tdPromedio = `<td class="text-center"><span class="badge bg-info text-dark badge-promedio">${data.asistencias} / ${data.total} Asistencias</span></td>`;
+            valorEscala10 = data.total > 0 ? (data.asistencias / data.total) * 10 : 0;
+          } else {
+            var promNum = parseFloat(data.promedio);
+            var badgeColor = "bg-secondary";
+            
+            if (!isNaN(promNum)) {
+              valorEscala10 = promNum;
+              if (promNum >= 8) badgeColor = "bg-success";
+              else if (promNum >= 5) badgeColor = "bg-warning text-dark";
+              else badgeColor = "bg-danger";
+            } else {
+              valorEscala10 = 0;
+            }
+            
+            var textProm = data.promedio !== "N/A" ? data.promedio : "Sin notas";
+            tdPromedio = `<td class="text-center"><span class="badge ${badgeColor} badge-promedio">${textProm}</span></td>`;
+          }
+          
+          tr.innerHTML = tdRubro + tdTotal + tdHechas + tdNoHechas + tdPromedio;
+          tbody.appendChild(tr);
+
+          // Preparar Arrays para la Gráfica
+          rubrosLabels.push(rubro);
+          var valFinal = parseFloat(valorEscala10.toFixed(2));
+          rubrosValores.push(valFinal);
+
+          // Regla de Color de la Barra: < 5 Rojo, >= 5 Verde
+          if (valFinal < 5) {
+            barColors.push("#dc3545"); // Rojo
+          } else {
+            barColors.push("#198754"); // Verde
+          }
+        }
+        
+        document.getElementById("resultadoArea").classList.remove("d-none");
+
+        // Renderizar o actualizar la Gráfica de Barras
+        renderizarGrafica(rubrosLabels, rubrosValores, barColors);
+      }
+
+      function renderizarGrafica(labels, valores, coloresBarra) {
+        var ctx = document.getElementById('graficaRubros').getContext('2d');
+        
+        // Destruir gráfica previa para evitar sobreposición al buscar otro alumno
+        if (miGrafica) {
+          miGrafica.destroy();
+        }
+
+        miGrafica = new Chart(ctx, {
+          type: 'bar',
+          plugins: [ChartDataLabels],
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Puntaje (0 al 10)',
+              data: valores,
+              backgroundColor: coloresBarra,
+              borderColor: coloresBarra,
+              borderWidth: 1,
+              borderRadius: 6
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: {
+                beginAtZero: true,
+                min: 0,
+                max: 10,
+                ticks: {
+                  stepSize: 1,
+                  font: { weight: 'bold' }
+                },
+                title: {
+                  display: true,
+                  text: 'Escala de Calificación',
+                  font: { weight: 'bold' }
+                }
+              },
+              x: {
+                ticks: {
+                  font: { weight: 'bold' }
+                }
+              }
+            },
+            plugins: {
+              legend: {
+                display: false
+              },
+              // Configuración del indicador numérico sobre cada barra
+              datalabels: {
+                anchor: 'end',
+                align: 'top',
+                formatter: function(value) {
+                  return value;
+                },
+                // Regla del texto: Si es 0 se pone Rojo, sino color oscuro
+                color: function(context) {
+                  var val = context.dataset.data[context.dataIndex];
+                  return val === 0 ? '#dc3545' : '#212529';
+                },
+                font: {
+                  weight: 'bold',
+                  size: 13
+                }
+              }
+            }
+          }
+        });
+      }
+
+      function mostrarError(err) {
+        document.getElementById("loading").classList.add("d-none");
+        var errorDiv = document.getElementById("errorArea");
+        errorDiv.textContent = "Error de comunicación: " + (err.message || err);
+        errorDiv.classList.remove("d-none");
+      }
+    </script>
+  </body>
+</html>
